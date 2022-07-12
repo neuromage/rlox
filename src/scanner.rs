@@ -152,37 +152,37 @@ impl<'a> Scanner<'a> {
                 ',' => self.add_token(TokenType::Comma, start_column),
                 '.' => self.add_token(TokenType::Dot, start_column),
 
-                '=' => self.parse_one_or_two_char_operator(
-                    &mut iter,
-                    start_column,
-                    TokenType::Equal,
-                    '=',
-                    TokenType::EqualEqual,
-                ),
+                '=' => {
+                    if self.match_and_consume_char(&mut iter, '=') {
+                        self.add_token(TokenType::EqualEqual, start_column)
+                    } else {
+                        self.add_token(TokenType::Equal, start_column)
+                    }
+                }
 
-                '<' => self.parse_one_or_two_char_operator(
-                    &mut iter,
-                    start_column,
-                    TokenType::LessThan,
-                    '=',
-                    TokenType::LessThanEqual,
-                ),
+                '<' => {
+                    if self.match_and_consume_char(&mut iter, '=') {
+                        self.add_token(TokenType::LessThanEqual, start_column)
+                    } else {
+                        self.add_token(TokenType::LessThan, start_column)
+                    }
+                }
 
-                '>' => self.parse_one_or_two_char_operator(
-                    &mut iter,
-                    start_column,
-                    TokenType::GreaterThan,
-                    '=',
-                    TokenType::GreaterThanEqual,
-                ),
+                '>' => {
+                    if self.match_and_consume_char(&mut iter, '=') {
+                        self.add_token(TokenType::GreaterThanEqual, start_column)
+                    } else {
+                        self.add_token(TokenType::GreaterThan, start_column)
+                    }
+                }
 
-                '!' => self.parse_one_or_two_char_operator(
-                    &mut iter,
-                    start_column,
-                    TokenType::Bang,
-                    '=',
-                    TokenType::BangEqual,
-                ),
+                '!' => {
+                    if self.match_and_consume_char(&mut iter, '=') {
+                        self.add_token(TokenType::BangEqual, start_column)
+                    } else {
+                        self.add_token(TokenType::Bang, start_column)
+                    }
+                }
 
                 start_char if start_char.is_alphabetic() => {
                     let mut current_pos: usize = start_pos;
@@ -232,24 +232,22 @@ impl<'a> Scanner<'a> {
         })
     }
 
-    fn parse_one_or_two_char_operator(
+    fn match_and_consume_char(
         &mut self,
         iter: &mut Peekable<Enumerate<Chars>>,
-        start_column: usize,
-        first_token_type: TokenType,
-        second_char: char,
-        second_token_type: TokenType,
-    ) {
-        if let Some((_, next_char)) = iter.peek() {
-            if *next_char == second_char {
-                iter.next();
-                self.current_column += 1;
-                self.add_token(second_token_type, start_column);
-            } else {
-                self.add_token(first_token_type, start_column)
+        char_to_match: char,
+    ) -> bool {
+        match iter.peek() {
+            None => false,
+            Some((_, next_char)) => {
+                if *next_char == char_to_match {
+                    iter.next();
+                    self.current_column += 1;
+                    true
+                } else {
+                    false
+                }
             }
-        } else {
-            self.add_token(first_token_type, start_column)
         }
     }
 }
