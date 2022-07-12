@@ -134,7 +134,7 @@ impl<'a> Scanner<'a> {
             let start_column = self.current_column;
 
             match ch {
-                ' ' => continue,
+                ' ' | '\t' | '\r' => continue,
                 '\n' => {
                     self.current_line += 1;
                     self.current_column = 0;
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn it_scans_parens_and_braces() {
+    fn parens_and_braces() {
         assert_scans_tokens!(
             "(  )\n( ( ) {   } } {",
             [
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn it_scans_operators() {
+    fn operators() {
         assert_scans_tokens!(
             "+ ++",
             [
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn it_scans_every_keyword() {
+    fn every_keyword() {
         assert_scans_tokens!("if", [(TokenType::If, 1, 1), (TokenType::Eof, 1, 3)]);
         assert_scans_tokens!("else", [(TokenType::Else, 1, 1), (TokenType::Eof, 1, 5)]);
         assert_scans_tokens!("while", [(TokenType::While, 1, 1), (TokenType::Eof, 1, 6)]);
@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn it_scans_identifiers() {
+    fn identifiers() {
         assert_scans_tokens!(
             "some_function",
             [
@@ -455,6 +455,20 @@ mod tests {
                 (TokenType::Super, 1, 52),
                 (TokenType::Class, 1, 58),
                 (TokenType::Eof, 1, 63)
+            ]
+        );
+    }
+
+    #[test]
+    fn whitespace() {
+        assert_scans_tokens!(
+            "var\n\tvar\n var\r\nvar",
+            [
+                (TokenType::Var, 1, 1),
+                (TokenType::Var, 2, 2),
+                (TokenType::Var, 3, 2),
+                (TokenType::Var, 4, 1),
+                (TokenType::Eof, 4, 4),
             ]
         );
     }
