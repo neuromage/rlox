@@ -147,10 +147,24 @@ impl<'a> Scanner<'a> {
 
                 '+' => self.add_token(TokenType::Plus, start_column),
                 '-' => self.add_token(TokenType::Minus, start_column),
-                '/' => self.add_token(TokenType::Slash, start_column),
                 '*' => self.add_token(TokenType::Star, start_column),
                 ',' => self.add_token(TokenType::Comma, start_column),
                 '.' => self.add_token(TokenType::Dot, start_column),
+
+                '/' => {
+                    if self.match_and_consume_char(&mut iter, '/') {
+                        // Ignore the rest of the line.
+                        while let Some((_, next_char)) = iter.peek() {
+                            if *next_char == '\n' {
+                                break;
+                            } else {
+                                iter.next();
+                            }
+                        }
+                    } else {
+                        self.add_token(TokenType::Slash, start_column)
+                    }
+                }
 
                 '=' => {
                     if self.match_and_consume_char(&mut iter, '=') {
@@ -320,15 +334,7 @@ mod tests {
             ]
         );
 
-        assert_scans_tokens!(
-            "/ //",
-            [
-                (TokenType::Slash, 1, 1),
-                (TokenType::Slash, 1, 3),
-                (TokenType::Slash, 1, 4),
-                (TokenType::Eof, 1, 5),
-            ]
-        );
+        assert_scans_tokens!("/ //", [(TokenType::Slash, 1, 1), (TokenType::Eof, 1, 5),]);
         assert_scans_tokens!(
             "* **",
             [
@@ -471,6 +477,15 @@ mod tests {
                 (TokenType::Eof, 4, 4),
             ]
         );
+    }
+
+    fn comments() {
+        assert_scans_tokens!("// This is some comment", [(TokenType::Eof, 1, 24),]);
+        assert_scans_tokens!(
+            "// This is some comment\nvar // Inline comment.",
+            [(TokenType::Var, 2, 1), (TokenType::Eof, 2, 23),]
+        );
+        assert_scans_tokens!("// This is some comment\n", [(TokenType::Eof, 2, 1),]);
     }
 
     fn assert_invalid_character(
