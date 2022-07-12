@@ -1,4 +1,6 @@
 use phf::phf_map;
+use std::iter::{Enumerate, Peekable};
+use std::str::Chars;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -143,6 +145,45 @@ impl<'a> Scanner<'a> {
                 '{' => self.add_token(TokenType::LeftBrace, start_column),
                 '}' => self.add_token(TokenType::RightBrace, start_column),
 
+                '+' => self.add_token(TokenType::Plus, start_column),
+                '-' => self.add_token(TokenType::Minus, start_column),
+                '/' => self.add_token(TokenType::Slash, start_column),
+                '*' => self.add_token(TokenType::Star, start_column),
+                ',' => self.add_token(TokenType::Comma, start_column),
+                '.' => self.add_token(TokenType::Dot, start_column),
+
+                '=' => self.parse_one_or_two_char_operator(
+                    &mut iter,
+                    start_column,
+                    TokenType::Equal,
+                    '=',
+                    TokenType::EqualEqual,
+                ),
+
+                '<' => self.parse_one_or_two_char_operator(
+                    &mut iter,
+                    start_column,
+                    TokenType::LessThan,
+                    '=',
+                    TokenType::LessThanEqual,
+                ),
+
+                '>' => self.parse_one_or_two_char_operator(
+                    &mut iter,
+                    start_column,
+                    TokenType::GreaterThan,
+                    '=',
+                    TokenType::GreaterThanEqual,
+                ),
+
+                '!' => self.parse_one_or_two_char_operator(
+                    &mut iter,
+                    start_column,
+                    TokenType::Bang,
+                    '=',
+                    TokenType::BangEqual,
+                ),
+
                 start_char if start_char.is_alphabetic() => {
                     let mut current_pos: usize = start_pos;
                     while let Some((_, next_char)) = iter.peek() {
@@ -177,6 +218,8 @@ impl<'a> Scanner<'a> {
             }
         }
 
+        self.add_token(TokenType::Eof, self.current_column + 1);
+
         // println!("Got tokens:\n{:?}", self.tokens);
         Ok(())
     }
@@ -187,6 +230,27 @@ impl<'a> Scanner<'a> {
             line: self.current_line,
             column: column,
         })
+    }
+
+    fn parse_one_or_two_char_operator(
+        &mut self,
+        iter: &mut Peekable<Enumerate<Chars>>,
+        start_column: usize,
+        first_token_type: TokenType,
+        second_char: char,
+        second_token_type: TokenType,
+    ) {
+        if let Some((_, next_char)) = iter.peek() {
+            if *next_char == second_char {
+                iter.next();
+                self.current_column += 1;
+                self.add_token(second_token_type, start_column);
+            } else {
+                self.add_token(first_token_type, start_column)
+            }
+        } else {
+            self.add_token(first_token_type, start_column)
+        }
     }
 }
 
@@ -208,7 +272,12 @@ mod tests {
 
             let result = scan($source);
             assert!(result.is_ok(), "\nExpected OK scanning:\n'''\n{}\n'''\nInstead got error: {:?}", $source, result.unwrap_err());
-            assert_eq!(result.unwrap(), expected);
+            let got = result.unwrap();
+
+            // // Skip Eof when comparing.
+            // let got = &got[..got.len() - 1];
+
+            assert_eq!(got, expected, "\nWhile scanning:\n'''\n{}\n'''\nExpected:\n{:?}\nInstead got\n: {:?}", $source, expected, got);
         }};
     }
 
@@ -226,35 +295,141 @@ mod tests {
                 (TokenType::RightBrace, 2, 11),
                 (TokenType::RightBrace, 2, 13),
                 (TokenType::LeftBrace, 2, 15),
+                (TokenType::Eof, 2, 16),
+            ]
+        );
+    }
+
+    #[test]
+    fn it_scans_operators() {
+        assert_scans_tokens!(
+            "+ ++",
+            [
+                (TokenType::Plus, 1, 1),
+                (TokenType::Plus, 1, 3),
+                (TokenType::Plus, 1, 4),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "- --",
+            [
+                (TokenType::Minus, 1, 1),
+                (TokenType::Minus, 1, 3),
+                (TokenType::Minus, 1, 4),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "/ //",
+            [
+                (TokenType::Slash, 1, 1),
+                (TokenType::Slash, 1, 3),
+                (TokenType::Slash, 1, 4),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+        assert_scans_tokens!(
+            "* **",
+            [
+                (TokenType::Star, 1, 1),
+                (TokenType::Star, 1, 3),
+                (TokenType::Star, 1, 4),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "= == = =",
+            [
+                (TokenType::Equal, 1, 1),
+                (TokenType::EqualEqual, 1, 3),
+                (TokenType::Equal, 1, 6),
+                (TokenType::Equal, 1, 8),
+                (TokenType::Eof, 1, 9),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "! != ! = !",
+            [
+                (TokenType::Bang, 1, 1),
+                (TokenType::BangEqual, 1, 3),
+                (TokenType::Bang, 1, 6),
+                (TokenType::Equal, 1, 8),
+                (TokenType::Bang, 1, 10),
+                (TokenType::Eof, 1, 11),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "< <= <<",
+            [
+                (TokenType::LessThan, 1, 1),
+                (TokenType::LessThanEqual, 1, 3),
+                (TokenType::LessThan, 1, 6),
+                (TokenType::LessThan, 1, 7),
+                (TokenType::Eof, 1, 8),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "> >= >>",
+            [
+                (TokenType::GreaterThan, 1, 1),
+                (TokenType::GreaterThanEqual, 1, 3),
+                (TokenType::GreaterThan, 1, 6),
+                (TokenType::GreaterThan, 1, 7),
+                (TokenType::Eof, 1, 8),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ", . this.variable_",
+            [
+                (TokenType::Comma, 1, 1),
+                (TokenType::Dot, 1, 3),
+                (TokenType::This, 1, 5),
+                (TokenType::Dot, 1, 9),
+                (TokenType::Identifier(String::from("variable_")), 1, 10),
+                (TokenType::Eof, 1, 19),
             ]
         );
     }
 
     #[test]
     fn it_scans_every_keyword() {
-        assert_scans_tokens!("if", [(TokenType::If, 1, 1)]);
-        assert_scans_tokens!("else", [(TokenType::Else, 1, 1)]);
-        assert_scans_tokens!("while", [(TokenType::While, 1, 1)]);
-        assert_scans_tokens!("for", [(TokenType::For, 1, 1)]);
-        assert_scans_tokens!("print", [(TokenType::Print, 1, 1)]);
-        assert_scans_tokens!("nil", [(TokenType::Nil, 1, 1)]);
-        assert_scans_tokens!("return", [(TokenType::Return, 1, 1)]);
-        assert_scans_tokens!("fun", [(TokenType::Fun, 1, 1)]);
-        assert_scans_tokens!("var", [(TokenType::Var, 1, 1)]);
-        assert_scans_tokens!("class", [(TokenType::Class, 1, 1)]);
-        assert_scans_tokens!("super", [(TokenType::Super, 1, 1)]);
-        assert_scans_tokens!("this", [(TokenType::This, 1, 1)]);
-        assert_scans_tokens!("true", [(TokenType::True, 1, 1)]);
-        assert_scans_tokens!("false", [(TokenType::False, 1, 1)]);
-        assert_scans_tokens!("and", [(TokenType::And, 1, 1)]);
-        assert_scans_tokens!("or", [(TokenType::Or, 1, 1)]);
+        assert_scans_tokens!("if", [(TokenType::If, 1, 1), (TokenType::Eof, 1, 3)]);
+        assert_scans_tokens!("else", [(TokenType::Else, 1, 1), (TokenType::Eof, 1, 5)]);
+        assert_scans_tokens!("while", [(TokenType::While, 1, 1), (TokenType::Eof, 1, 6)]);
+        assert_scans_tokens!("for", [(TokenType::For, 1, 1), (TokenType::Eof, 1, 4)]);
+        assert_scans_tokens!("print", [(TokenType::Print, 1, 1), (TokenType::Eof, 1, 6)]);
+        assert_scans_tokens!("nil", [(TokenType::Nil, 1, 1), (TokenType::Eof, 1, 4)]);
+        assert_scans_tokens!(
+            "return",
+            [(TokenType::Return, 1, 1), (TokenType::Eof, 1, 7)]
+        );
+        assert_scans_tokens!("fun", [(TokenType::Fun, 1, 1), (TokenType::Eof, 1, 4)]);
+        assert_scans_tokens!("var", [(TokenType::Var, 1, 1), (TokenType::Eof, 1, 4)]);
+        assert_scans_tokens!("class", [(TokenType::Class, 1, 1), (TokenType::Eof, 1, 6)]);
+        assert_scans_tokens!("super", [(TokenType::Super, 1, 1), (TokenType::Eof, 1, 6)]);
+        assert_scans_tokens!("this", [(TokenType::This, 1, 1), (TokenType::Eof, 1, 5)]);
+        assert_scans_tokens!("true", [(TokenType::True, 1, 1), (TokenType::Eof, 1, 5)]);
+        assert_scans_tokens!("false", [(TokenType::False, 1, 1), (TokenType::Eof, 1, 6)]);
+        assert_scans_tokens!("and", [(TokenType::And, 1, 1), (TokenType::Eof, 1, 4)]);
+        assert_scans_tokens!("or", [(TokenType::Or, 1, 1), (TokenType::Eof, 1, 3)]);
     }
 
     #[test]
     fn it_scans_identifiers() {
         assert_scans_tokens!(
             "some_function",
-            [(TokenType::Identifier(String::from("some_function")), 1, 1)]
+            [
+                (TokenType::Identifier(String::from("some_function")), 1, 1),
+                (TokenType::Eof, 1, 14)
+            ]
         );
         assert_scans_tokens!(
             "fun some_function(",
@@ -262,6 +437,7 @@ mod tests {
                 (TokenType::Fun, 1, 1),
                 (TokenType::Identifier(String::from("some_function")), 1, 5),
                 (TokenType::LeftParen, 1, 18),
+                (TokenType::Eof, 1, 19)
             ]
         );
 
@@ -280,6 +456,7 @@ mod tests {
                 (TokenType::For, 1, 48),
                 (TokenType::Super, 1, 52),
                 (TokenType::Class, 1, 58),
+                (TokenType::Eof, 1, 63)
             ]
         );
     }
@@ -305,11 +482,11 @@ mod tests {
     #[test]
     fn invalid_identifiers() {
         assert_invalid_character("hello    world\n   it's a new day!", '\'', 2, 6);
-        assert_invalid_character("hello=  lox", '=', 1, 6);
-        assert_invalid_character("hel_lo=  lox", '=', 1, 7);
-        assert_invalid_character("hel _lo=  lox", '_', 1, 5);
-        assert_invalid_character("hel\n_lo=  lox", '_', 2, 1);
-        assert_invalid_character("_lo=  lox", '_', 1, 1);
+        assert_invalid_character("hello$  lox", '$', 1, 6);
+        assert_invalid_character("hel_lo$  lox", '$', 1, 7);
+        assert_invalid_character("hel _lo$  lox", '_', 1, 5);
+        assert_invalid_character("hel\n_lo$  lox", '_', 2, 1);
+        assert_invalid_character("_lo$  lox", '_', 1, 1);
     }
 
     #[test]
