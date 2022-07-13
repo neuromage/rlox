@@ -11,6 +11,9 @@ pub enum ScannerError {
         line: usize,
         column: usize,
     },
+
+    #[error("unterminated string literal which started at line {line:}, column {column:}")]
+    UnterminatedStringLiteral { line: usize, column: usize },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -68,8 +71,6 @@ pub enum TokenType {
 
     Nil,
     Eof,
-
-    Word(String),
 }
 
 static RESERVED: phf::Map<&'static str, TokenType> = phf_map! {
@@ -151,6 +152,42 @@ impl<'a> Scanner<'a> {
                 ',' => self.add_token(TokenType::Comma, start_column),
                 '.' => self.add_token(TokenType::Dot, start_column),
 
+                '"' => {
+                    let start_line = self.current_line;
+                    loop {
+                        match iter.peek() {
+                            Some((_, '\n')) => {
+                                iter.next();
+                                self.current_line += 1;
+                                self.current_column = 0;
+                                continue;
+                            }
+                            Some((_, '"')) => {
+                                let (current_pos, _) = iter.next().unwrap();
+                                self.current_column += 1;
+                                self.add_token_with_line(
+                                    TokenType::String(String::from(
+                                        &self.source_code[start_pos + 1..current_pos],
+                                    )),
+                                    start_column,
+                                    start_line,
+                                );
+                                break;
+                            }
+                            Some((_, _)) => {
+                                iter.next();
+                                self.current_column += 1;
+                            }
+                            None => {
+                                return Err(ScannerError::UnterminatedStringLiteral {
+                                    line: start_line,
+                                    column: start_column,
+                                });
+                            }
+                        }
+                    }
+                }
+
                 '/' => {
                     if self.match_and_consume_char(&mut iter, '/') {
                         // Ignore the rest of the line.
@@ -198,6 +235,50 @@ impl<'a> Scanner<'a> {
                     }
                 }
 
+                '0'..='9' => {
+                    let mut is_float = false;
+                    let mut current_pos = start_pos;
+                    loop {
+                        match iter.peek() {
+                            Some((_, next_char)) => {
+                                if is_number(*next_char) {
+                                    (current_pos, _) = iter.next().unwrap();
+                                    self.current_column += 1;
+                                } else if *next_char == '.' && !is_float {
+                                    let mut peek_ahead_iter = iter.clone();
+                                    peek_ahead_iter.next();
+                                    if let Some((_, peek_ahead_char)) = peek_ahead_iter.peek() {
+                                        if is_number(*peek_ahead_char) {
+                                            is_float = true;
+                                            iter.next();
+                                            (current_pos, _) = iter.next().unwrap();
+                                            self.current_column += 2;
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            None => {
+                                break;
+                            }
+                        }
+                    }
+                    if is_float {
+                        let number: f64 =
+                            self.source_code[start_pos..=current_pos].parse().unwrap();
+                        self.add_token(TokenType::Float(number), start_column);
+                    } else {
+                        let number: i64 =
+                            self.source_code[start_pos..=current_pos].parse().unwrap();
+                        self.add_token(TokenType::Int(number), start_column);
+                    }
+                }
+
                 start_char if start_char.is_alphabetic() => {
                     let mut current_pos: usize = start_pos;
                     while let Some((_, next_char)) = iter.peek() {
@@ -234,7 +315,6 @@ impl<'a> Scanner<'a> {
 
         self.add_token(TokenType::Eof, self.current_column + 1);
 
-        // println!("Got tokens:\n{:?}", self.tokens);
         Ok(())
     }
 
@@ -242,6 +322,14 @@ impl<'a> Scanner<'a> {
         self.tokens.push(Token {
             token_type,
             line: self.current_line,
+            column: column,
+        })
+    }
+
+    fn add_token_with_line(&mut self, token_type: TokenType, column: usize, line: usize) {
+        self.tokens.push(Token {
+            token_type,
+            line: line,
             column: column,
         })
     }
@@ -266,6 +354,13 @@ impl<'a> Scanner<'a> {
     }
 }
 
+fn is_number(char_to_match: char) -> bool {
+    match char_to_match {
+        '0'..='9' => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,10 +381,26 @@ mod tests {
             assert!(result.is_ok(), "\nExpected OK scanning:\n'''\n{}\n'''\nInstead got error: {:?}", $source, result.unwrap_err());
             let got = result.unwrap();
 
-            // // Skip Eof when comparing.
-            // let got = &got[..got.len() - 1];
+            assert_eq!(got, expected, "\nWhile scanning:\n'''\n{}\n'''\nExpected:\n{:?}\nInstead got:\n{:?}", $source, expected, got);
+        }};
+    }
 
-            assert_eq!(got, expected, "\nWhile scanning:\n'''\n{}\n'''\nExpected:\n{:?}\nInstead got\n: {:?}", $source, expected, got);
+    macro_rules! assert_scan_error {
+        ( $source:expr, $expected_err:expr) => {{
+            let result = scan($source);
+            assert!(
+                result.is_err(),
+                "\nExpected error scanning:\n'''\n{}\n'''\nInstead got OK Result containing:\n{:?}",
+                $source,
+                result.unwrap()
+            );
+
+            let got_err = result.unwrap_err();
+            assert_eq!(
+                got_err, $expected_err,
+                "\nWhile scanning:\n'''\n{}\n'''\nExpected error:\n{:?}\nInstead got error:\n{:?}",
+                $source, $expected_err, got_err
+            );
         }};
     }
 
@@ -503,6 +614,135 @@ mod tests {
                 line: at_line,
                 column: at_column,
             }
+        );
+    }
+
+    #[test]
+    fn number_literals() {
+        assert_scans_tokens!(
+            "123",
+            [(TokenType::Int(123), 1, 1), (TokenType::Eof, 1, 4),]
+        );
+
+        assert_scans_tokens!(
+            "123.",
+            [
+                (TokenType::Int(123), 1, 1),
+                (TokenType::Dot, 1, 4),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ".123",
+            [
+                (TokenType::Dot, 1, 1),
+                (TokenType::Int(123), 1, 2),
+                (TokenType::Eof, 1, 5),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ".123.",
+            [
+                (TokenType::Dot, 1, 1),
+                (TokenType::Int(123), 1, 2),
+                (TokenType::Dot, 1, 5),
+                (TokenType::Eof, 1, 6),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ".123. 0",
+            [
+                (TokenType::Dot, 1, 1),
+                (TokenType::Int(123), 1, 2),
+                (TokenType::Dot, 1, 5),
+                (TokenType::Int(0), 1, 7),
+                (TokenType::Eof, 1, 8),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ".123.0",
+            [
+                (TokenType::Dot, 1, 1),
+                (TokenType::Float(123.0), 1, 2),
+                (TokenType::Eof, 1, 7),
+            ]
+        );
+
+        assert_scans_tokens!(
+            ".123.0.1",
+            [
+                (TokenType::Dot, 1, 1),
+                (TokenType::Float(123.0), 1, 2),
+                (TokenType::Dot, 1, 7),
+                (TokenType::Int(1), 1, 8),
+                (TokenType::Eof, 1, 9),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "123\n456",
+            [
+                (TokenType::Int(123), 1, 1),
+                (TokenType::Int(456), 2, 1),
+                (TokenType::Eof, 2, 4),
+            ]
+        );
+
+        assert_scans_tokens!(
+            "123.0",
+            [(TokenType::Float(123.0), 1, 1), (TokenType::Eof, 1, 6),]
+        );
+        assert_scans_tokens!(
+            "1.23",
+            [(TokenType::Float(1.23), 1, 1), (TokenType::Eof, 1, 5),]
+        );
+    }
+
+    #[test]
+    fn string_literals() {
+        assert_scans_tokens!(
+            r#"var a = "This is a literal string""#,
+            [
+                (TokenType::Var, 1, 1),
+                (TokenType::Identifier(String::from("a")), 1, 5),
+                (TokenType::Equal, 1, 7),
+                (
+                    TokenType::String(String::from("This is a literal string")),
+                    1,
+                    9
+                ),
+                (TokenType::Eof, 1, 35),
+            ]
+        );
+
+        assert_scans_tokens!(
+            r#""This is a
+multiline string""#,
+            [
+                (
+                    TokenType::String(String::from("This is a\nmultiline string")),
+                    1,
+                    1
+                ),
+                (TokenType::Eof, 2, 18),
+            ]
+        );
+    }
+
+    #[test]
+    fn unterminated_string() {
+        assert_scan_error!(
+            r#""Unterminated!!"#,
+            ScannerError::UnterminatedStringLiteral { line: 1, column: 1 }
+        );
+        assert_scan_error!(
+            r#""Multiline
+            unterminated"#,
+            ScannerError::UnterminatedStringLiteral { line: 1, column: 1 }
         );
     }
 
