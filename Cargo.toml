@@ -1,12 +1,17 @@
 [package]
 name = "rlox"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+
+[profile.release]
+debug = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "3.2.8", features = ["derive"] }
-thiserror = "1.0.31"
-anyhow = "1.0.58"
-phf =  { version = "0.10", features = ["macros"] }
+clap = { version = "4.5.31", features = ["derive"] }
+thiserror = "2.0.12"
+anyhow = "1.0.97"
+lazy_static = "1.5.0"
+miette = { version = "7.5.0", features = ["fancy"] }
+googletest = "0.13.0"
